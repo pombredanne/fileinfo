@@ -1103,6 +1103,9 @@ void setDarkModeBasedOnSystemTheme()
     {
         g_isDarkMode = (dwUseLightTheme == 0);
     }
-    // if none is specified, use default, which is light theme
-    g_isDarkMode = false;
+    else
+    {
+        // if none is specified, use default, which is light theme
+        g_isDarkMode = false;
+    }
 }
