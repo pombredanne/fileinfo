@@ -48,6 +48,7 @@ Information shown by this program:
 const wchar_t g_MicrosoftSymbolServerURL[] = L"https://msdl.microsoft.com/download/symbols";
 const wchar_t g_MozillaSymbolServerURL[] = L"https://symbols.mozilla.org/";
 const wchar_t g_ChromiumSymbolServerURL[] = L"https://chromium-browser-symsrv.commondatastorage.googleapis.com";
+const wchar_t g_Unity3dSymbolServerURL[] = L"https://symbolserver.unity3d.com/"; // Ref: https://docs.unity3d.com/Manual/WindowsDebugging.html
 wstring g_symbolServerUsed = g_MicrosoftSymbolServerURL;
 const wchar_t g_localSymbolCacheDirectory[] = L"C:\\ProgramData\\dbg\\sym";
 
@@ -731,9 +732,10 @@ void pdbDownloadCompleted(bool successful, DWORD dwStatusCode, DWORD numberOfByt
         default:
             SetWindowTextW(g_hEditStatus, (L"Error: " + std::to_wstring(dwStatusCode)).c_str());
             break;
-        }            
+        }
     }
     EnableWindow(g_hBtnDownloadSymbol, TRUE);
+    EnableWindow(g_hBtnConfig, TRUE);
 }
 void pdbDownloadProgressNotified(DWORD numberOfBytesRead, DWORD contentLength)
 {
@@ -930,6 +932,7 @@ void HandleControlCommands(UINT code, HWND hwnd)
         {
             SetWindowTextW(g_hEditStatus, L"");
             EnableWindow(g_hBtnDownloadSymbol, FALSE);
+            EnableWindow(g_hBtnConfig, FALSE);
             appendTextOnEdit(g_hEditMsg, L"\r\n");
             copyModuleBinaryToDisk(filePath, g_exeKey, g_localSymbolCacheDirectory);
             if (downloadSymbolToDisk(g_symbolServerUsed, g_debugGUID, g_debugAge, g_pdbFile, g_localSymbolCacheDirectory))
@@ -1042,7 +1045,8 @@ void HandleControlCommands(UINT code, HWND hwnd)
                 writeConsole(hStdout, wstring(L" [1] Microsoft Symbol Server: ") + g_MicrosoftSymbolServerURL + L"\n");
                 writeConsole(hStdout, wstring(L" [2] Mozilla Symbol Server: ") + g_MozillaSymbolServerURL + L"\n");
                 writeConsole(hStdout, wstring(L" [3] Chromium Symbol Server: ") + g_ChromiumSymbolServerURL + L"\n");
-                writeConsole(hStdout, L" [4] Enter a symbol server manually\n");
+                writeConsole(hStdout, wstring(L" [4] Unity 3D Symbol Server: ") + g_Unity3dSymbolServerURL + L"\n");
+                writeConsole(hStdout, L" [5] Enter a symbol server manually\n");
                 writeConsole(hStdout, L"Your selection: ");
                 option = getStdin(hStdin);
                 if (option == L"1")
@@ -1058,6 +1062,10 @@ void HandleControlCommands(UINT code, HWND hwnd)
                     g_symbolServerUsed = g_ChromiumSymbolServerURL;
                 }
                 else if (option == L"4")
+                {
+                    g_symbolServerUsed = g_Unity3dSymbolServerURL;
+                }
+                else if (option == L"5")
                 {
                     writeConsole(hStdout, L"Enter the symbol server to use: ");
                     wstring userSymbolServer = getStdin(hStdin);
