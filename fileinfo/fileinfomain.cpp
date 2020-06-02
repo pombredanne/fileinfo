@@ -46,6 +46,9 @@ Information shown by this program:
 4. Debug GUID)";
 
 const wchar_t g_MicrosoftSymbolServerURL[] = L"https://msdl.microsoft.com/download/symbols";
+const wchar_t g_MozillaSymbolServerURL[] = L"https://symbols.mozilla.org/";
+const wchar_t g_ChromiumSymbolServerURL[] = L"https://chromium-browser-symsrv.commondatastorage.googleapis.com";
+wstring g_symbolServerUsed = g_MicrosoftSymbolServerURL;
 const wchar_t g_localSymbolCacheDirectory[] = L"C:\\ProgramData\\dbg\\sym";
 
 struct undocCodeViewFormat
@@ -149,7 +152,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             g_hBtnOpenProperties = CreateWindowExW(WS_EX_CLIENTEDGE, L"BUTTON", L"Properties",
                 WS_TABSTOP | WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | (g_isDarkMode ? BS_OWNERDRAW : 0), 0, 0, 10, 10, hwnd, NULL, g_hInstance, nullptr);
 
-            g_hBtnConfig = CreateWindowExW(WS_EX_CLIENTEDGE, L"BUTTON", L"Config Proxy",
+            g_hBtnConfig = CreateWindowExW(WS_EX_CLIENTEDGE, L"BUTTON", L"Configure",
                 WS_TABSTOP | WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | (g_isDarkMode ? BS_OWNERDRAW : 0), 0, 0, 10, 10, hwnd, NULL, g_hInstance, nullptr);
 
             g_hProgressBar = CreateWindowExW(0, PROGRESS_CLASSW, nullptr, WS_CHILD | WS_VISIBLE, 0,
@@ -734,7 +737,12 @@ void pdbDownloadCompleted(bool successful, DWORD dwStatusCode, DWORD numberOfByt
 }
 void pdbDownloadProgressNotified(DWORD numberOfBytesRead, DWORD contentLength)
 {
-    if (contentLength != NetAsync::NO_CONTENT_LENGTH && numberOfBytesRead <= contentLength)
+    if (contentLength == NetAsync::NO_CONTENT_LENGTH)
+    {
+        SetWindowTextW(g_hEditStatus, (std::to_wstring(numberOfBytesRead) + L" bytes downloaded").c_str());
+        return;
+    }
+    if (numberOfBytesRead <= contentLength)
     {
         unsigned long long temp = numberOfBytesRead;  // avoid overflow
         temp *= 1000;
@@ -747,7 +755,14 @@ void pdbDownloadProgressNotified(DWORD numberOfBytesRead, DWORD contentLength)
 void pdbDownloadContentLengthObtained(DWORD contentLength)
 {
     SendMessageW(g_hProgressBar, PBM_SETRANGE32, 0, 1000);
-    SetWindowTextW(g_hEditStatus, (L"0 bytes / " + std::to_wstring(contentLength)).c_str());
+    if (contentLength != NetAsync::NO_CONTENT_LENGTH)
+    {
+        SetWindowTextW(g_hEditStatus, (L"0 bytes / " + std::to_wstring(contentLength)).c_str());
+    }        
+    else
+    {
+        SetWindowTextW(g_hEditStatus, L"0 bytes downloaded");
+    }
 }
 void copyModuleBinaryToDisk(const wstring& binaryFilePath, const wstring& exekey, const wstring& localSymbolPath)
 {
@@ -793,7 +808,7 @@ bool downloadSymbolToDisk(const wstring& symbolServer, const wstring& symbolGUID
     wstring urlToDownload;
     wstring normalizedSymbolGUID;
     wstring normalizedSymbolFilename;  // extract filename in case symbolFilename is full path
-    size_t lastBackslashInFilename = symbolFilename.find_last_of(L'\\');
+    size_t lastBackslashInFilename = symbolFilename.find_last_of(L"/\\");    
     if (lastBackslashInFilename != -1)
     {
         normalizedSymbolFilename = symbolFilename.substr(lastBackslashInFilename + 1);
@@ -917,7 +932,7 @@ void HandleControlCommands(UINT code, HWND hwnd)
             EnableWindow(g_hBtnDownloadSymbol, FALSE);
             appendTextOnEdit(g_hEditMsg, L"\r\n");
             copyModuleBinaryToDisk(filePath, g_exeKey, g_localSymbolCacheDirectory);
-            if (downloadSymbolToDisk(g_MicrosoftSymbolServerURL, g_debugGUID, g_debugAge, g_pdbFile, g_localSymbolCacheDirectory))
+            if (downloadSymbolToDisk(g_symbolServerUsed, g_debugGUID, g_debugAge, g_pdbFile, g_localSymbolCacheDirectory))
             {
                 //appendTextOnEdit(g_hEditMsg, L"PDB File is successfully cached.\r\n");  // pending
             }
@@ -979,34 +994,78 @@ void HandleControlCommands(UINT code, HWND hwnd)
                 writeConsole(hStdout, L"\"Unknown\"\n");
                 break;
             }
+            writeConsole(hStdout, L"Current symbol server is: ");
+            writeConsole(hStdout, g_symbolServerUsed);
             writeConsole(hStdout, L"\n");
-            writeConsole(hStdout, L"Enter the new proxy setting to use:\n");
-            writeConsole(hStdout, L" [0] Keep the original proxy setting\n");
-            writeConsole(hStdout, L" [1] Direct (no proxy)\n");
-            writeConsole(hStdout, L" [2] System proxy\n");
-            writeConsole(hStdout, L" [3] Enter a proxy server manually\n");
+            writeConsole(hStdout, L"\n");
+            writeConsole(hStdout, L"What do you want to do:\n");
+            writeConsole(hStdout, L" [0] Exit\n");
+            writeConsole(hStdout, L" [1] Change the proxy server\n");
+            writeConsole(hStdout, L" [2] Change the symbol server\n");
             writeConsole(hStdout, L"Your selection: ");
             wstring option = getStdin(hStdin);
             if (option == L"1")
             {
-                proxyType = NetAsyncProxyType::Direct;
-                g_proxyServer = L"";
+                writeConsole(hStdout, L"Enter the new proxy setting to use:\n");
+                writeConsole(hStdout, L" [0] Keep the original proxy setting\n");
+                writeConsole(hStdout, L" [1] Direct (no proxy)\n");
+                writeConsole(hStdout, L" [2] System proxy\n");
+                writeConsole(hStdout, L" [3] Enter a proxy server manually\n");
+                writeConsole(hStdout, L"Your selection: ");
+                option = getStdin(hStdin);
+                if (option == L"1")
+                {
+                    proxyType = NetAsyncProxyType::Direct;
+                    g_proxyServer = L"";
+                }
+                else if (option == L"2")
+                {
+                    proxyType = NetAsyncProxyType::System;
+                    g_proxyServer = L"";
+                }
+                else if (option == L"3")
+                {
+                    proxyType = NetAsyncProxyType::UserSpecified;
+                    writeConsole(hStdout, L"Enter the proxy server to use (hostname:port): ");
+                    wstring userProxyServer = getStdin(hStdin);
+                    g_proxyServer = userProxyServer;
+                }
+                else
+                {
+                    // no change
+                }
             }
             else if (option == L"2")
             {
-                proxyType = NetAsyncProxyType::System;
-                g_proxyServer = L"";
-            }
-            else if (option == L"3")
-            {
-                proxyType = NetAsyncProxyType::UserSpecified;
-                writeConsole(hStdout, L"Enter the proxy server to use (hostname:port): ");
-                wstring userProxyServer = getStdin(hStdin);
-                g_proxyServer = userProxyServer;
-            }
-            else
-            {
-                // no change
+                writeConsole(hStdout, L"Enter the new symbol server to use:\n");
+                writeConsole(hStdout, L" [0] Keep the original symbol server\n");
+                writeConsole(hStdout, wstring(L" [1] Microsoft Symbol Server: ") + g_MicrosoftSymbolServerURL + L"\n");
+                writeConsole(hStdout, wstring(L" [2] Mozilla Symbol Server: ") + g_MozillaSymbolServerURL + L"\n");
+                writeConsole(hStdout, wstring(L" [3] Chromium Symbol Server: ") + g_ChromiumSymbolServerURL + L"\n");
+                writeConsole(hStdout, L" [4] Enter a symbol server manually\n");
+                writeConsole(hStdout, L"Your selection: ");
+                option = getStdin(hStdin);
+                if (option == L"1")
+                {
+                    g_symbolServerUsed = g_MicrosoftSymbolServerURL;
+                }
+                else if (option == L"2")
+                {
+                    g_symbolServerUsed = g_MozillaSymbolServerURL;
+                }
+                else if (option == L"3")
+                {
+                    g_symbolServerUsed = g_ChromiumSymbolServerURL;
+                }
+                else if (option == L"4")
+                {
+                    writeConsole(hStdout, L"Enter the symbol server to use: ");
+                    wstring userSymbolServer = getStdin(hStdin);
+                    if (userSymbolServer.find(L"http://") == 0 || userSymbolServer.find(L"https://") == 0)
+                    {
+                        g_symbolServerUsed = userSymbolServer;
+                    }
+                }
             }
             FreeConsole();
         }
