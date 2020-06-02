@@ -719,7 +719,6 @@ void pdbDownloadCompleted(bool successful, DWORD dwStatusCode, DWORD numberOfByt
         if (g_compressedTried)
         {
             // Downloaded file is a CAB compressed file. Use built-in expand.exe to decompress it.
-            // Don't delete the original download, since expand.exe may fail.
             wstring argsToExpand = L"-R \"" + localSavedPath + L"\"";
             SHELLEXECUTEINFOW execInfo{};
             execInfo.cbSize = sizeof(execInfo);
@@ -743,6 +742,7 @@ void pdbDownloadCompleted(bool successful, DWORD dwStatusCode, DWORD numberOfByt
                         if (exitCode == ERROR_SUCCESS)
                         {
                             appendTextOnEdit(g_hEditMsg, L"Decompression is successful.\r\n");
+                            // Don't delete the original download, in case user wants to keep the compressed PDB.
                         }
                         else if (exitCode == STILL_ACTIVE)
                         {
