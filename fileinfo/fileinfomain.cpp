@@ -721,8 +721,53 @@ void pdbDownloadCompleted(bool successful, DWORD dwStatusCode, DWORD numberOfByt
             // Downloaded file is a CAB compressed file. Use built-in expand.exe to decompress it.
             // Don't delete the original download, since expand.exe may fail.
             wstring argsToExpand = L"-R \"" + localSavedPath + L"\"";
-            ShellExecuteW(g_hMain, L"open", L"C:\\Windows\\System32\\expand.exe", argsToExpand.c_str(), L"C:\\Windows\\System32", HIDE_WINDOW);
-            appendTextOnEdit(g_hEditMsg, L"Decompression finished.\r\n");
+            SHELLEXECUTEINFOW execInfo{};
+            execInfo.cbSize = sizeof(execInfo);
+            execInfo.fMask = SEE_MASK_NOCLOSEPROCESS;
+            execInfo.hwnd = g_hMain;
+            execInfo.lpVerb = L"open";
+            execInfo.lpFile = L"C:\\Windows\\System32\\expand.exe";
+            execInfo.lpParameters = argsToExpand.c_str();
+            execInfo.lpDirectory = L"C:\\Windows\\System32";
+            execInfo.nShow = HIDE_WINDOW;
+
+            appendTextOnEdit(g_hEditMsg, L"Decompressing downloaded file ...\r\n");
+            if (ShellExecuteExW(&execInfo))
+            {
+                if (execInfo.hProcess)
+                {
+                    WaitForSingleObject(execInfo.hProcess, 5000);
+                    DWORD exitCode = 0;
+                    if (GetExitCodeProcess(execInfo.hProcess, &exitCode))
+                    {
+                        if (exitCode == ERROR_SUCCESS)
+                        {
+                            appendTextOnEdit(g_hEditMsg, L"Decompression is successful.\r\n");
+                        }
+                        else if (exitCode == STILL_ACTIVE)
+                        {
+                            appendTextOnEdit(g_hEditMsg, L"Can't determine if the decompression is successful or not.\r\n");
+                        }
+                        else
+                        {
+                            appendTextOnEdit(g_hEditMsg, L"Decompression has failed: expand.exe returns " + std::to_wstring(exitCode) + L"\r\n");
+                        }
+                    }
+                    else
+                    {
+                        appendTextOnEdit(g_hEditMsg, L"Can't determine if the decompression is successful or not.\r\n");
+                    }
+                    CloseHandle(execInfo.hProcess);
+                }
+                else
+                {
+                    appendTextOnEdit(g_hEditMsg, L"Can't determine if the decompression is successful or not.\r\n");
+                }
+            }
+            else
+            {
+                appendTextOnEdit(g_hEditMsg, L"Can't decompress the downloaded PDB file: Can't execute expand.exe\r\n");
+            }
         }
         SendMessageW(g_hProgressBar, PBM_SETPOS, 1000, 0);
         SendMessageW(g_hProgressBar, PBM_SETBARCOLOR, 0, COLOR_TOTAL_BLACK);
