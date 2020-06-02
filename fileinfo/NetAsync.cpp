@@ -135,7 +135,7 @@ void __stdcall NetAsync::internalCallback(HINTERNET hInternet, DWORD_PTR dwConte
                     context->fileWriter.close();
                 DeleteFileW(context->tempFilePath.c_str());
                 if (context->callbacks.pCompletion)
-                    context->callbacks.pCompletion(false, context->dwStatusCode, 0, 0);
+                    context->callbacks.pCompletion(false, context->dwStatusCode, 0, 0, context->savedPath);
                 return;
             }
         }
@@ -164,7 +164,7 @@ void __stdcall NetAsync::internalCallback(HINTERNET hInternet, DWORD_PTR dwConte
                         MoveFileW(context->tempFilePath.c_str(), context->savedPath.c_str());
                         //saveContentToDisk(context->vecContent, context->savedPath);
                         if (context->callbacks.pCompletion)
-                            context->callbacks.pCompletion(true, context->dwStatusCode, context->dwNumberOfByteDownloaded, context->dwContentLength);
+                            context->callbacks.pCompletion(true, context->dwStatusCode, context->dwNumberOfByteDownloaded, context->dwContentLength, context->savedPath);
                     }
                     else
                     {
@@ -173,7 +173,7 @@ void __stdcall NetAsync::internalCallback(HINTERNET hInternet, DWORD_PTR dwConte
                             context->fileWriter.close();
                         //DeleteFileW(context->tempFilePath.c_str());    // keep temp file for resumption
                         if (context->callbacks.pCompletion)
-                            context->callbacks.pCompletion(false, STATUS_NETASYNC_INTERRUPTED_RESPONSE, context->dwNumberOfByteDownloaded, context->dwContentLength);
+                            context->callbacks.pCompletion(false, STATUS_NETASYNC_INTERRUPTED_RESPONSE, context->dwNumberOfByteDownloaded, context->dwContentLength, context->savedPath);
                     }
                     return;
                 }

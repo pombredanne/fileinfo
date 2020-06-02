@@ -92,6 +92,7 @@ constexpr unsigned long MAIN_WIDTH = 650;
 constexpr unsigned long MAIN_HEIGHT = 600;
 
 NetAsync* fileDownloader = nullptr;
+bool g_compressedTried = false;
 NetAsyncProxyType proxyType = NetAsyncProxyType::System;
 wstring g_proxyServer;
 bool g_isDarkMode = false;
@@ -115,7 +116,7 @@ void parseDllCharacteristics(WORD dll);
 DWORD rvaToRaw(DWORD rva);
 wstring guidToWstring(const GUID& guid);
 void getHashMessage(const char* const fileContent, const unsigned long fileLen);
-bool downloadSymbolToDisk(const wstring& symbolServer, const wstring& symbolGUID, const wstring& symbolAge, const wstring& symbolFilename, const wstring& localSymbolPath);
+bool downloadSymbolToDisk(const wstring& symbolServer, const wstring& symbolGUID, const wstring& symbolAge, const wstring& symbolFilename, const wstring& localSymbolPath, bool isCabCompressed);
 void HandleControlCommands(UINT code, HWND hwnd);
 bool appendTextOnEdit(HWND hEdit, const std::wstring& str);
 bool getFileSizeFromPath(const wstring& filePath, DWORD& filesize);
@@ -708,15 +709,26 @@ void getHashMessage(const char* const fileContent, const unsigned long fileLen)
     if (wsSHA256.length() > 0)
         fileInfoMsg += L"SHA256: " + wsSHA256 + L"\r\n";
 }
-void pdbDownloadCompleted(bool successful, DWORD dwStatusCode, DWORD numberOfBytesRead, DWORD contentLength)
+void pdbDownloadCompleted(bool successful, DWORD dwStatusCode, DWORD numberOfBytesRead, DWORD contentLength, wstring localSavedPath)
 {
     delete fileDownloader;
     fileDownloader = nullptr;
     if (successful)
     {
+        appendTextOnEdit(g_hEditMsg, L"Downloaded PDB is saved to " + localSavedPath + L"\r\n");
+        if (g_compressedTried)
+        {
+            // Downloaded file is a CAB compressed file. Use built-in expand.exe to decompress it.
+            // Don't delete the original download, since expand.exe may fail.
+            wstring argsToExpand = L"-R \"" + localSavedPath + L"\"";
+            ShellExecuteW(g_hMain, L"open", L"C:\\Windows\\System32\\expand.exe", argsToExpand.c_str(), L"C:\\Windows\\System32", HIDE_WINDOW);
+            appendTextOnEdit(g_hEditMsg, L"Decompression finished.\r\n");
+        }
         SendMessageW(g_hProgressBar, PBM_SETPOS, 1000, 0);
         SendMessageW(g_hProgressBar, PBM_SETBARCOLOR, 0, COLOR_TOTAL_BLACK);
         SetWindowTextW(g_hEditStatus, (L"Succeeded. Size=" + std::to_wstring(numberOfBytesRead) + L" bytes").c_str());
+        EnableWindow(g_hBtnDownloadSymbol, TRUE);
+        EnableWindow(g_hBtnConfig, TRUE);
     }
     else
     {
@@ -725,17 +737,36 @@ void pdbDownloadCompleted(bool successful, DWORD dwStatusCode, DWORD numberOfByt
         {
         case NetAsync::NO_STATUS_CODE:
             SetWindowTextW(g_hEditStatus, L"Error: Connection failed");
+            appendTextOnEdit(g_hEditMsg, L"Error: Connection failed.\r\n");
             break;
         case NetAsync::STATUS_NETASYNC_INTERRUPTED_RESPONSE:
-            SetWindowTextW(g_hEditStatus, L"Error: Download interrupted");            
+            SetWindowTextW(g_hEditStatus, L"Error: Download interrupted");
+            appendTextOnEdit(g_hEditMsg, L"Error: Download interrupted\r\n");
             break;
         default:
             SetWindowTextW(g_hEditStatus, (L"Error: " + std::to_wstring(dwStatusCode)).c_str());
+            appendTextOnEdit(g_hEditMsg, L"Error: " + std::to_wstring(dwStatusCode) + L"\r\n");
             break;
         }
+        if (!g_compressedTried)
+        {
+            g_compressedTried = true;
+            if (downloadSymbolToDisk(g_symbolServerUsed, g_debugGUID, g_debugAge, g_pdbFile, g_localSymbolCacheDirectory, true))
+            {
+                //appendTextOnEdit(g_hEditMsg, L"PDB File is successfully cached.\r\n");  // pending
+            }
+            else
+            {
+                appendTextOnEdit(g_hEditMsg, L"Error: PDB File is not cached.\r\n");
+            }
+        }
+        else
+        {
+            g_compressedTried = false;
+            EnableWindow(g_hBtnDownloadSymbol, TRUE);
+            EnableWindow(g_hBtnConfig, TRUE);
+        }
     }
-    EnableWindow(g_hBtnDownloadSymbol, TRUE);
-    EnableWindow(g_hBtnConfig, TRUE);
 }
 void pdbDownloadProgressNotified(DWORD numberOfBytesRead, DWORD contentLength)
 {
@@ -802,7 +833,7 @@ void copyModuleBinaryToDisk(const wstring& binaryFilePath, const wstring& exekey
         }
     }
 }
-bool downloadSymbolToDisk(const wstring& symbolServer, const wstring& symbolGUID, const wstring& symbolAge, const wstring& symbolFilename, const wstring& localSymbolPath)
+bool downloadSymbolToDisk(const wstring& symbolServer, const wstring& symbolGUID, const wstring& symbolAge, const wstring& symbolFilename, const wstring& localSymbolPath, bool isCabCompressed)
 {
     if (symbolGUID.length() == 0 || symbolFilename.length() == 0)
         return false;
@@ -841,7 +872,11 @@ bool downloadSymbolToDisk(const wstring& symbolServer, const wstring& symbolGUID
     {
         urlToDownload = symbolServer + L"/" + normalizedSymbolFilename + L"/" + normalizedSymbolGUID + L"/" + normalizedSymbolFilename;
     }   
-    
+    if (isCabCompressed)
+    {
+        // change the filename extension from .pdb to .pd_
+        urlToDownload[urlToDownload.length() - 1] = L'_';
+    }
     wstring dirToCreate;
     if (localSymbolPath.find_last_of(L'\\') == localSymbolPath.length() - 1)
     {
@@ -855,6 +890,11 @@ bool downloadSymbolToDisk(const wstring& symbolServer, const wstring& symbolGUID
     dirToCreate += L'\\' + normalizedSymbolGUID;
     CreateDirectoryW(dirToCreate.c_str(), nullptr);
     wstring pdbPath = dirToCreate + L"\\" + normalizedSymbolFilename;
+    if (isCabCompressed)
+    {
+        pdbPath[pdbPath.length() - 1] = L'_';
+    }
+
     if (PathFileExistsW(pdbPath.c_str()))
     {
         appendTextOnEdit(g_hEditMsg, L"PDB file is already cached at " + pdbPath + L"\r\n");
@@ -935,7 +975,7 @@ void HandleControlCommands(UINT code, HWND hwnd)
             EnableWindow(g_hBtnConfig, FALSE);
             appendTextOnEdit(g_hEditMsg, L"\r\n");
             copyModuleBinaryToDisk(filePath, g_exeKey, g_localSymbolCacheDirectory);
-            if (downloadSymbolToDisk(g_symbolServerUsed, g_debugGUID, g_debugAge, g_pdbFile, g_localSymbolCacheDirectory))
+            if (downloadSymbolToDisk(g_symbolServerUsed, g_debugGUID, g_debugAge, g_pdbFile, g_localSymbolCacheDirectory, false))
             {
                 //appendTextOnEdit(g_hEditMsg, L"PDB File is successfully cached.\r\n");  // pending
             }

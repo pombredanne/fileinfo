@@ -5,7 +5,7 @@
 #include <string>
 #include <fstream>
 
-using CompletionCallback = void (*)(bool isSuccessful, DWORD statusCode, DWORD numberOfBytesRead, DWORD contentLength);
+using CompletionCallback = void (*)(bool isSuccessful, DWORD statusCode, DWORD numberOfBytesRead, DWORD contentLength, std::wstring localSavedFilePath);
 using ProgressCallback = void (*)(DWORD numberOfBytesRead, DWORD contentLength);
 using ContentLengthCallback = void (*)(DWORD contentLength);
 struct NetCallbacks
