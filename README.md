@@ -12,7 +12,7 @@ Usage: `QuickFileInfo.exe [file path] [--proxy=domain:port] [--dark | --light]`
  * `--dark` | `--light`: Enable or disable dark mode. If not set, the system default theme is used.  
  * `--run1`: Add an additional button. Clicking it opens the specified external program.
       [path of external exe]: The full path of the external program. Don't quote it if it contains space; instead, quote the entire --run1 parameter.   
-      [parameters to external exe]: The parameters to the external program. %1 refers to [file path]. Note that quotes inside this sub-parameter MUST be escaped as \".   
+      [parameters to external exe]: The parameters to the external program. %1 refers to [file path]. Note that quotes inside this sub-parameter MUST be escaped as \\".   
       [button name]: The text shown on this button.   
       [admin]: Specify the string "admin" (without quotes) to launch the external program as administrator; otherwise it will be launched unelevated.   
 
