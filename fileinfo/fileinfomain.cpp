@@ -33,11 +33,16 @@ HKCR\dllfile\shell\Check Info\command: (default) [exe path] "%1" [option]
 HKCR\exefile\shell\Check Info\command: (default) [exe path] "%1" [option]
 HKCR\sysfile\shell\Check Info\command: (default) [exe path] "%1" [option]
 
-Usage: QuickFileInfo.exe [file path] [--proxy=domain:port] [--dark | --light]
+Usage: QuickFileInfo.exe [file path] [--proxy=domain:port] [--dark | --light] ["--run1=[path of external exe]|[parameters to external exe]|[button name]|[admin]"]
   --proxy: The proxy server to use to download PDB symbols from Microsoft.
            You can specify --proxy=direct to never use a proxy, and
            --proxy=system to use the system proxy.
   --dark | --light: Enable or disable dark mode. If not set, the system default theme is used.
+  --run1: Add an additional button. Clicking it opens the specified external program.
+            [path of external exe]: The full path of the external program. Don't quote it if it contains space; instead, quote the entire --run1 parameter.
+            [parameters to external exe]: The parameters to the external program. %1 refers to [file path]. Note that quotes inside this sub-parameter MUST be escaped as \".
+            [button name]: The text shown on this button.
+            [admin]: Specify the string "admin" (without quotes) to launch the external program as administrator; otherwise it will be launched unelevated.
 
 Information shown by this program:
 1. 64-bit vs 32-bit
@@ -59,6 +64,13 @@ struct undocCodeViewFormat
     GUID guid;  // 16-byte GUID12
     DWORD age;  // incremented each time the executable and its associated pdb file is remade by the linker
     char pdbName[1];  // zero terminated UTF8 path and file name
+};
+struct externalProgramBtnInfo
+{
+    wstring programPath;
+    wstring programParameter;
+    wstring buttonName;
+    bool runAsAdmin;
 };
 
 wstring filePath;
@@ -86,6 +98,7 @@ HWND g_hBtnDownloadSymbol = NULL;
 HWND g_hBtnRegisterDLL = NULL;
 HWND g_hBtnOpenProperties = NULL;
 HWND g_hBtnConfig = NULL;
+vector<HWND> g_arr_hBtnExternals;
 HWND g_hProgressBar = NULL;
 HWND g_hEditStatus = NULL;
 constexpr unsigned long MAIN_WIDTH = 650;
@@ -98,6 +111,7 @@ wstring g_proxyServer;
 bool g_isDarkMode = false;
 bool g_forceDarkMode = false;  // true if dark mode is enabled in command line arguments
 bool g_forceLightMode = false;  // true if light mode is enabled in command line arguments
+vector<externalProgramBtnInfo> g_arrExternalProgramBtnInfo;
 
 #define COLOR_TOTAL_BLACK RGB(0,0,0)
 #define COLOR_SOFT_WHITE RGB(200, 200, 200)
@@ -141,7 +155,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             appendTextOnEdit(g_hEditMsg, fileInfoMsg);
             SendMessageW(g_hEditMsg, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, 10);
 
-            g_hBtnDownloadSymbol = CreateWindowExW(WS_EX_CLIENTEDGE, L"BUTTON", L"Download Symbol",
+            g_hBtnDownloadSymbol = CreateWindowExW(WS_EX_CLIENTEDGE, L"BUTTON", L"Download PDB",
                 WS_TABSTOP | WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | (g_isDarkMode ? BS_OWNERDRAW : 0), 0, 0, 10, 10, hwnd, NULL, g_hInstance, nullptr);
             if ((g_debugGUID.size() == 0) || (g_pdbFile.size() == 0))
             {
@@ -156,6 +170,13 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
             g_hBtnConfig = CreateWindowExW(WS_EX_CLIENTEDGE, L"BUTTON", L"Configure",
                 WS_TABSTOP | WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | (g_isDarkMode ? BS_OWNERDRAW : 0), 0, 0, 10, 10, hwnd, NULL, g_hInstance, nullptr);
+
+            for (auto btnInfo : g_arrExternalProgramBtnInfo)
+            {
+                HWND hBtnExternal = CreateWindowExW(WS_EX_CLIENTEDGE, L"BUTTON", btnInfo.buttonName.c_str(),
+                    WS_TABSTOP | WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | (g_isDarkMode ? BS_OWNERDRAW : 0), 0, 0, 10, 10, hwnd, NULL, g_hInstance, nullptr);
+                g_arr_hBtnExternals.push_back(hBtnExternal);
+            }
 
             g_hProgressBar = CreateWindowExW(0, PROGRESS_CLASSW, nullptr, WS_CHILD | WS_VISIBLE, 0,
                 0, 10, 10, hwnd, NULL, g_hInstance, nullptr);
@@ -172,8 +193,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             // set font
             HFONT hFont = CreateFontA(-17, 0, 0, 0, FW_DONTCARE, FALSE, FALSE, FALSE, ANSI_CHARSET, OUT_DEFAULT_PRECIS,
                 CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, "Times New Roman");
-            HWND arr_hwndNeedFont[] = { g_hEditMsg, g_hBtnDownloadSymbol, g_hBtnRegisterDLL, g_hBtnOpenProperties, g_hBtnConfig, g_hEditStatus };
-            for (size_t i = 0; i < _countof(arr_hwndNeedFont); i++)
+            vector<HWND> arr_hwndNeedFont = { g_hEditMsg, g_hBtnDownloadSymbol, g_hBtnRegisterDLL, g_hBtnOpenProperties, g_hBtnConfig, g_hEditStatus };
+            arr_hwndNeedFont.insert(arr_hwndNeedFont.end(), g_arr_hBtnExternals.begin(), g_arr_hBtnExternals.end());
+            for (size_t i = 0; i < arr_hwndNeedFont.size(); i++)
             {
                 SendMessageW(arr_hwndNeedFont[i], WM_SETFONT, (WPARAM)hFont, MAKELPARAM(FALSE, 0));
             }
@@ -186,13 +208,14 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         GetClientRect(hwnd, &rcClient);
         if (g_hEditMsg)
             SetWindowPos(g_hEditMsg, NULL, 0, 5, rcClient.right, rcClient.bottom - 110, SWP_NOZORDER);
-        HWND arr_hwndBtn[] = { g_hBtnDownloadSymbol, g_hBtnRegisterDLL, g_hBtnOpenProperties, g_hBtnConfig };
-        for (int i = 0; i < _countof(arr_hwndBtn); i++)
-        {
+        vector<HWND> arr_hwndBtn = { g_hBtnDownloadSymbol, g_hBtnRegisterDLL, g_hBtnOpenProperties, g_hBtnConfig };
+        arr_hwndBtn.insert(arr_hwndBtn.end(), g_arr_hBtnExternals.begin(), g_arr_hBtnExternals.end());
+        for (int i = 0; i < arr_hwndBtn.size(); i++)
+        {            
             if (arr_hwndBtn[i])
             {
-                SetWindowPos(arr_hwndBtn[i], NULL, (long long)rcClient.right * i / _countof(arr_hwndBtn), rcClient.bottom - 100,
-                    rcClient.right / _countof(arr_hwndBtn), 50, SWP_NOZORDER);
+                SetWindowPos(arr_hwndBtn[i], NULL, (long long)rcClient.right * i / arr_hwndBtn.size(), rcClient.bottom - 100,
+                    rcClient.right / arr_hwndBtn.size(), 50, SWP_NOZORDER);
             }
         }
         if (g_hProgressBar)
@@ -295,9 +318,9 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
             for (int index = 2; index < argc; index++)
             {
                 std::wstring arg = argv[index];
-                if (arg.find(L"--proxy=") == 0 && arg.length() > 8)
+                if (arg.find(L"--proxy=") == 0 && arg.length() > (sizeof(L"--proxy=") / 2 - 1))
                 {
-                    arg = arg.substr(8);
+                    arg = arg.substr(sizeof(L"--proxy=") / 2 - 1);
                     if (arg == L"direct")
                     {
                         proxyType = NetAsyncProxyType::Direct;
@@ -319,6 +342,62 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
                 else if (arg.find(L"--light") == 0)
                 {
                     g_forceLightMode = true;
+                }
+                else if (arg.find(L"--run1=") == 0 && arg.length() > (sizeof(L"--run1=") / 2 - 1))
+                {
+                    // e.g. --run1=C:\PE Tools\depends.exe|\"%1\"|Open Depends|noadmin
+                    wstring programPath;
+                    wstring programParam;
+                    wstring buttonName;
+                    bool runAsAdmin = false;
+                    arg = arg.substr(sizeof(L"--run1=") / 2 - 1);
+                    // arg is: C:\Tools\depends.exe|\"%1\"|Open Depends|noadmin
+                    for (size_t indexSeparator = arg.find(L"|"), count = 0; arg.length() > 0; indexSeparator = arg.find(L"|"), count++)
+                    {
+                        wstring currentParameter; 
+                        if (indexSeparator == -1)
+                        {
+                            currentParameter = arg;
+                            arg = L"";
+                        }
+                        else
+                        {
+                            currentParameter = arg.substr(0, indexSeparator);
+                            arg = arg.substr(indexSeparator + 1);
+                        }
+                        switch (count)
+                        {
+                        case 0:
+                            programPath = currentParameter;
+                            break;
+                        case 1:
+                        {
+                            programParam = currentParameter;
+                            wstring placeholderForFullExePath = L"%1";
+                            auto indexOfPercentOne = programParam.find(placeholderForFullExePath);
+                            if (indexOfPercentOne != -1)
+                            {
+                                programParam.replace(indexOfPercentOne, placeholderForFullExePath.length(), filePath);
+                            }
+                            break;
+                        }                            
+                        case 2:
+                            buttonName = currentParameter;
+                            break;
+                        case 3:
+                            if (currentParameter == L"admin")                            
+                                runAsAdmin = true;                            
+                            else                            
+                                runAsAdmin = false;
+                            break;
+                        default:
+                            break;
+                        }
+                    }
+                    if (programPath.length() > 0 && buttonName.length() > 0)
+                    {
+                        g_arrExternalProgramBtnInfo.push_back({ programPath, programParam, buttonName, runAsAdmin });
+                    }
                 }
             }
             
@@ -365,17 +444,6 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
     }
     return static_cast<int>(Msg.wParam);
 }
-/*int main(void)
-{
-    if (downloadSymbolToDisk(L"https://msdl.microsoft.com/download/symbols", L"A3028D6B45DA006244A6C9E4DDDA11021", L"rpcrt4.pdb",
-        L"C:\\ProgramData\\dbg\\sym"))
-        std::cout << "OK\n";
-    else
-        std::cout << "Not OK\n";
-    std::cout << "Done\n";
-    getchar();
-    return 0;
-}*/
 bool doWork()
 {
     bool status = false;
@@ -985,21 +1053,6 @@ bool downloadSymbolToDisk(const wstring& symbolServer, const wstring& symbolGUID
         isSuccess = fileDownloader->startDownload(urlToDownload.c_str(), pdbPath.c_str(), callbacks);
     }
     return isSuccess;
-    /*
-    NetworkLib downloader(L"PDB Symbol Downloader");
-    vector<char> pdbContent = downloader.getURL(urlToDownload.c_str());
-    if (pdbContent.size() == 0)
-    {
-        return false;
-    }
-    std::ofstream writer(pdbPath.c_str(), std::ios::binary | std::ios::out | std::ios::trunc);
-    if (writer)
-    {
-        writer.write(pdbContent.data(), pdbContent.size());
-        writer.close();
-        return true;
-    }
-    return false;*/
 }
 bool appendTextOnEdit(HWND hEdit, const std::wstring& str)
 {
@@ -1161,6 +1214,16 @@ void HandleControlCommands(UINT code, HWND hwnd)
                 }
             }
             FreeConsole();
+        }
+
+        for (auto k = 0; k < g_arr_hBtnExternals.size(); k++)
+        {
+            if (hwnd == g_arr_hBtnExternals[k])
+            {
+                const auto& externalInfo = g_arrExternalProgramBtnInfo[k];
+                ShellExecuteW(g_hMain, externalInfo.runAsAdmin ? L"runas" : L"open", externalInfo.programPath.c_str(),
+                    externalInfo.programParameter.c_str(), L"C:\\Windows\\System32", SHOW_OPENWINDOW);
+            }
         }
     }
 }
