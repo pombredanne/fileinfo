@@ -7,7 +7,7 @@ Add this program to Windows Explorer right click menu for easy use, by setting t
   `HKCR\exefile\shell\Check Info\command: (default) [exe path] "%1" [option]`  
   `HKCR\sysfile\shell\Check Info\command: (default) [exe path] "%1" [option]`  
 
-Usage: `QuickFileInfo.exe [file path] [--proxy=domain:port] [--dark | --light]`  
+Usage: QuickFileInfo.exe [file path] [--proxy=domain:port] [--dark | --light] ["--run1=[path of external exe]|[parameters to external exe]|[button name]|[admin]"]
  * `--proxy`: The proxy server to use to download PDB symbols from Microsoft. You can specify `--proxy=direct` to never use a proxy, and `--proxy=system` to use the system proxy.  
  * `--dark` | `--light`: Enable or disable dark mode. If not set, the system default theme is used.  
  * `--run1`: Add an additional button. Clicking it opens the specified external program.
