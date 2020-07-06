@@ -108,6 +108,7 @@ NetAsync* fileDownloader = nullptr;
 bool g_compressedTried = false;
 NetAsyncProxyType proxyType = NetAsyncProxyType::System;
 wstring g_proxyServer;
+wstring g_proxyBypass = L"<local>";
 bool g_isDarkMode = false;
 bool g_forceDarkMode = false;  // true if dark mode is enabled in command line arguments
 bool g_forceLightMode = false;  // true if light mode is enabled in command line arguments
@@ -332,7 +333,17 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
                     else
                     {
                         proxyType = NetAsyncProxyType::UserSpecified;
-                        g_proxyServer = arg;
+                        auto indexSeparator = arg.find(L'|');
+                        if (indexSeparator == -1)
+                        {
+                            g_proxyServer = arg;
+                            g_proxyBypass = L"<local>";
+                        }
+                        else
+                        {
+                            g_proxyServer = arg.substr(0, indexSeparator);
+                            g_proxyBypass = arg.substr(indexSeparator + 1);
+                        }
                     }
                 }
                 else if (arg.find(L"--dark") == 0)
@@ -1035,9 +1046,9 @@ bool downloadSymbolToDisk(const wstring& symbolServer, const wstring& symbolGUID
     else
     {
         appendTextOnEdit(g_hEditMsg, L"Downloading PDB from " + urlToDownload + L"\r\n");
-    }    
+    }
 
-    fileDownloader = new NetAsync(L"PDB Symbol Downloader", proxyType, g_proxyServer.c_str(), L"<local>");
+    fileDownloader = new NetAsync(L"PDB Symbol Downloader", proxyType, g_proxyServer.c_str(), g_proxyBypass.c_str());
     NetCallbacks callbacks{ };
     callbacks.pCompletion = pdbDownloadCompleted;
     callbacks.pContentLength = pdbDownloadContentLengthObtained;
@@ -1130,6 +1141,7 @@ void HandleControlCommands(UINT code, HWND hwnd)
                 break;
             case NetAsyncProxyType::UserSpecified:
                 writeConsole(hStdout, g_proxyServer + L"\n");
+                writeConsole(hStdout, L"Proxy bypass list: " + g_proxyBypass + L"\n");
                 break;
             default:
                 writeConsole(hStdout, L"\"Unknown\"\n");
@@ -1170,6 +1182,8 @@ void HandleControlCommands(UINT code, HWND hwnd)
                     writeConsole(hStdout, L"Enter the proxy server to use (hostname:port): ");
                     wstring userProxyServer = getStdin(hStdin);
                     g_proxyServer = userProxyServer;
+                    writeConsole(hStdout, L"Enter the proxy bypass list: ");
+                    g_proxyBypass = getStdin(hStdin);
                 }
                 else
                 {
