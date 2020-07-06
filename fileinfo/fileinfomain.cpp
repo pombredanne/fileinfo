@@ -33,8 +33,8 @@ HKCR\dllfile\shell\Check Info\command: (default) [exe path] "%1" [option]
 HKCR\exefile\shell\Check Info\command: (default) [exe path] "%1" [option]
 HKCR\sysfile\shell\Check Info\command: (default) [exe path] "%1" [option]
 
-Usage: QuickFileInfo.exe [file path] [--proxy=domain:port] [--dark | --light] ["--run1=[path of external exe]|[parameters to external exe]|[button name]|[admin]"]
-  --proxy: The proxy server to use to download PDB symbols from Microsoft.
+Usage: QuickFileInfo.exe [file path] [--proxy=domain:port[|proxy bypass list]] [--dark | --light] ["--run1=[path of external exe]|[parameters to external exe]|[button name]|[admin]"]
+  --proxy: The proxy server to use to download PDB symbols.
            You can specify --proxy=direct to never use a proxy, and
            --proxy=system to use the system proxy.
   --dark | --light: Enable or disable dark mode. If not set, the system default theme is used.
